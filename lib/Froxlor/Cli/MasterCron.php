@@ -34,6 +34,7 @@ use Froxlor\Froxlor;
 use Froxlor\FroxlorLogger;
 use Froxlor\Settings;
 use Froxlor\System\Cronjob;
+use Froxlor\System\ServerInfo;
 use PDO;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -42,8 +43,6 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 final class MasterCron extends CliCommand
 {
-	private $lockFile = null;
-
 	private $cronLog = null;
 
 	protected function configure()
@@ -67,6 +66,16 @@ final class MasterCron extends CliCommand
 		if ($result != self::SUCCESS) {
 			// requirements failed, exit
 			return $result;
+		}
+
+		// multi-server: froxlor:cron consumes and DELETEs the panel_tasks queue
+		// and issues the panel certificate - running it on more than one node
+		// silently loses tasks (see MULTIWEB.md rule 2). With local_ips set,
+		// only the node explicitly marked as master may run it.
+		if (ServerInfo::isLocalIpScopeEnabled() && !ServerInfo::isMasterRole()) {
+			$output->writeln('<error>Multi-server configuration found ($multiserver[\'local_ips\']) but this node is not marked as the master.</>');
+			$output->writeln('<error>froxlor:cron must only run on the master node - set $multiserver[\'role\'] = \'master\' in lib/userdata.inc.php there; slave nodes use froxlor:cron-slave instead.</>');
+			return self::INVALID;
 		}
 
 		$jobs = $input->getArgument('job');
@@ -214,48 +223,6 @@ final class MasterCron extends CliCommand
 			FileDir::safe_exec('chown -R ' . $user . ':' . $group . ' ' . escapeshellarg($_mypath));
 		}
 		$output->writeln('OK');
-	}
-
-	private function lockJob(string $job, OutputInterface $output): bool
-	{
-
-		$this->lockFile = '/run/lock/froxlor_' . $job . '.lock';
-
-		if (file_exists($this->lockFile)) {
-			$jobinfo = json_decode(file_get_contents($this->lockFile), true);
-			if ($jobinfo === false || !is_array($jobinfo)) {
-				// looks like an invalid lockfile
-				$check_pid_return = 1;
-			} else {
-				$check_pid_return = null;
-				// get status of process
-				system("kill -CHLD " . (int)$jobinfo['pid'] . " 1> /dev/null 2> /dev/null", $check_pid_return);
-			}
-			if ($check_pid_return == 1) {
-				// Process does not seem to run, most likely it has died
-				$this->unlockJob();
-			} else {
-				// cronjob still running, output info and stop
-				$output->writeln([
-					'<comment>Job "' . $jobinfo['job'] . '" is currently running.',
-					'Started: ' . date('d.m.Y H:i', (int)$jobinfo['startts']),
-					'PID: ' . $jobinfo['pid'] . '</>'
-				]);
-				return false;
-			}
-		}
-
-		$jobinfo = [
-			'job' => $job,
-			'startts' => time(),
-			'pid' => getmypid()
-		];
-		return file_put_contents($this->lockFile, json_encode($jobinfo)) !== false;
-	}
-
-	private function unlockJob(): bool
-	{
-		return @unlink($this->lockFile);
 	}
 
 	private function getCronModule(string $cronname, OutputInterface $output)

@@ -35,6 +35,12 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 class CliCommand extends Command
 {
+	/**
+	 * path of the per-machine lockfile held while a cronjob runs
+	 *
+	 * @var string|null
+	 */
+	protected $lockFile = null;
 
 	protected function validateRequirements(OutputInterface $output, bool $ignore_has_updates = false): int
 	{
@@ -135,5 +141,51 @@ class CliCommand extends Command
 	private function cleanUpdateOutput($buffer): string
 	{
 		return strip_tags(preg_replace("/<br\W*?\/>/", "\n", $buffer));
+	}
+
+	/**
+	 * acquire a per-machine lock for the given job. Recovers a stale lockfile
+	 * whose owning process is no longer alive, and reports (returning false) if
+	 * a sibling process is still running the same job.
+	 */
+	protected function lockJob(string $job, OutputInterface $output): bool
+	{
+		$this->lockFile = '/run/lock/froxlor_' . $job . '.lock';
+
+		if (file_exists($this->lockFile)) {
+			$jobinfo = json_decode(file_get_contents($this->lockFile), true);
+			if ($jobinfo === false || !is_array($jobinfo)) {
+				// looks like an invalid lockfile
+				$check_pid_return = 1;
+			} else {
+				$check_pid_return = null;
+				// get status of process
+				system("kill -CHLD " . (int)$jobinfo['pid'] . " 1> /dev/null 2> /dev/null", $check_pid_return);
+			}
+			if ($check_pid_return == 1) {
+				// Process does not seem to run, most likely it has died
+				$this->unlockJob();
+			} else {
+				// cronjob still running, output info and stop
+				$output->writeln([
+					'<comment>Job "' . $jobinfo['job'] . '" is currently running.',
+					'Started: ' . date('d.m.Y H:i', (int)$jobinfo['startts']),
+					'PID: ' . $jobinfo['pid'] . '</>'
+				]);
+				return false;
+			}
+		}
+
+		$jobinfo = [
+			'job' => $job,
+			'startts' => time(),
+			'pid' => getmypid()
+		];
+		return file_put_contents($this->lockFile, json_encode($jobinfo)) !== false;
+	}
+
+	protected function unlockJob(): bool
+	{
+		return @unlink($this->lockFile);
 	}
 }
