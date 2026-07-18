@@ -54,6 +54,7 @@ class WebserverBase
 				LEFT JOIN `" . TABLE_PANEL_ADMINS . "` `a` ON (`a`.`adminid` = `c`.`adminid`)
 
 				WHERE `d`.`aliasdomain` IS NULL AND `d`.`email_only` <> '1'
+					" . \Froxlor\System\ServerInfo::ipFilterSql('d') . "
 				ORDER BY `d`.`parentdomainid` DESC, `d`.`iswildcarddomain`, `d`.`domain` ASC;
 		";
 
@@ -66,6 +67,7 @@ class WebserverBase
 			WHERE `p`.`id` = `di`.`id_ipandports`
 			AND `di`.`id_domain` = :domainid
 			AND `p`.`ssl` = '1'
+			" . \Froxlor\System\ServerInfo::ipPortFilterSql('p') . "
 		");
 
 		// prepare fpm-config select query
