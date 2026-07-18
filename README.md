@@ -4,6 +4,11 @@
 
 # Froxlor
 
+> **Note:** This is a **modified version of Froxlor**, not the official release.
+> It adds multi-server (multi-web) support — running several nodes off a single
+> shared database. See [MULTIWEB.md](MULTIWEB.md) for the design, configuration
+> and operational rules. Official Froxlor: https://github.com/froxlor/Froxlor
+
 The server administration software for your needs.
 Developed by experienced server administrators, this panel simplifies the effort of managing your hosting platform.
 
