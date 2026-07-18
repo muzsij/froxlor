@@ -93,6 +93,10 @@ class Nginx extends HttpConfigBase
 		");
 
 		while ($row_ipsandports = $result_ipsandports_stmt->fetch(PDO::FETCH_ASSOC)) {
+			// multi-server: never emit listen/vhost statements for another node's IPs
+			if (!\Froxlor\System\ServerInfo::servesIpAndPort((int)$row_ipsandports['id'])) {
+				continue;
+			}
 			if (filter_var($row_ipsandports['ip'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
 				$ip = '[' . $row_ipsandports['ip'] . ']';
 			} else {
@@ -107,7 +111,8 @@ class Nginx extends HttpConfigBase
 				$this->nginx_data[$vhost_filename] = '';
 			}
 
-			if ($row_ipsandports['vhostcontainer'] == '1') {
+			// the froxlor panel vhost is only served by the master node
+			if ($row_ipsandports['vhostcontainer'] == '1' && !\Froxlor\System\ServerInfo::isSlaveNode()) {
 				$this->nginx_data[$vhost_filename] .= 'server { ' . "\n";
 
 				$mypath = $this->getMyPath($row_ipsandports);
@@ -511,7 +516,7 @@ class Nginx extends HttpConfigBase
 		$has_http2_on = false;
 
 		$query = "SELECT * FROM `" . TABLE_PANEL_IPSANDPORTS . "` `i`, `" . TABLE_DOMAINTOIP . "` `dip`
-			WHERE dip.id_domain = :domainid AND i.id = dip.id_ipandports ";
+			WHERE dip.id_domain = :domainid AND i.id = dip.id_ipandports " . \Froxlor\System\ServerInfo::ipPortFilterSql('i');
 
 		if ($ssl_vhost === true && ($domain['ssl'] == '1' || $domain['ssl_redirect'] == '1')) {
 			// by ordering by cert-file the row with filled out SSL-Fields will be shown last,
@@ -592,6 +597,7 @@ class Nginx extends HttpConfigBase
 				LEFT JOIN `" . TABLE_DOMAINTOIP . "` `dip` ON (`ip`.`id` = `dip`.`id_ipandports`)
 				WHERE `dip`.`id_domain` = :domainid
 				AND `ip`.`ssl` = '1'  AND `ip`.`port` != 443
+				" . \Froxlor\System\ServerInfo::ipPortFilterSql('ip') . "
 				ORDER BY `ip`.`ssl_cert_file` DESC, `ip`.`port` LIMIT 1;");
 			$ssldestport = Database::pexecute_first($ssldestport_stmt, [
 				'domainid' => $domain['id']

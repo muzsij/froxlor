@@ -157,7 +157,7 @@ class TasksCron extends FroxlorCron
 		Database::query("UPDATE `" . TABLE_PANEL_SETTINGS . "` SET `value` = UNIX_TIMESTAMP() WHERE `settinggroup` = 'system' AND `varname` = 'last_tasks_run';");
 	}
 
-	private static function rebuildWebserverConfigs()
+	public static function rebuildWebserverConfigs()
 	{
 		if (Settings::Get('system.webserver') == "apache2") {
 			$websrv = '\\Froxlor\\Cron\\Http\\Apache';
@@ -208,11 +208,12 @@ class TasksCron extends FroxlorCron
 		}
 
 		// Tell the Let's Encrypt cron it's okay to generate the certificate and enable the redirect afterwards
-		$upd_stmt = Database::prepare("UPDATE `" . TABLE_PANEL_DOMAINS . "` SET `ssl_redirect` = '3' WHERE `ssl_redirect` = '2'");
+		// (in a multi-server setup only finalize the handshake for this node's own domains)
+		$upd_stmt = Database::prepare("UPDATE `" . TABLE_PANEL_DOMAINS . "` SET `ssl_redirect` = '3' WHERE `ssl_redirect` = '2'" . \Froxlor\System\ServerInfo::ipFilterSql(TABLE_PANEL_DOMAINS));
 		Database::pexecute($upd_stmt);
 	}
 
-	private static function createNewHome($row = null)
+	public static function createNewHome($row = null, bool $refreshUsers = true, bool $createMaildir = true)
 	{
 		FroxlorLogger::getInstanceOf()->logAction(FroxlorLogger::CRON_ACTION, LOG_INFO, 'TasksCron: Task2 started - create new home');
 
@@ -236,8 +237,10 @@ class TasksCron extends FroxlorCron
 			}
 
 			// maildir
-			FroxlorLogger::getInstanceOf()->logAction(FroxlorLogger::CRON_ACTION, LOG_NOTICE, 'Running: mkdir -p ' . escapeshellarg($usermaildir));
-			FileDir::safe_exec('mkdir -p ' . escapeshellarg($usermaildir));
+			if ($createMaildir) {
+				FroxlorLogger::getInstanceOf()->logAction(FroxlorLogger::CRON_ACTION, LOG_NOTICE, 'Running: mkdir -p ' . escapeshellarg($usermaildir));
+				FileDir::safe_exec('mkdir -p ' . escapeshellarg($usermaildir));
+			}
 
 			// check if admin of customer has added template for new customer directories
 			if ((int)$row['data']['store_defaultindex'] == 1) {
@@ -258,11 +261,15 @@ class TasksCron extends FroxlorCron
 				// mod_php -> no libnss-mysql -> no webserver-user in group
 				FileDir::safe_exec('chmod 0755 ' . escapeshellarg($userhomedir));
 			}
-			FroxlorLogger::getInstanceOf()->logAction(FroxlorLogger::CRON_ACTION, LOG_NOTICE, 'Running: chown -R ' . (int)Settings::Get('system.vmail_uid') . ':' . (int)Settings::Get('system.vmail_gid') . ' ' . escapeshellarg($usermaildir));
-			FileDir::safe_exec('chown -R ' . (int)Settings::Get('system.vmail_uid') . ':' . (int)Settings::Get('system.vmail_gid') . ' ' . escapeshellarg($usermaildir));
+			if ($createMaildir) {
+				FroxlorLogger::getInstanceOf()->logAction(FroxlorLogger::CRON_ACTION, LOG_NOTICE, 'Running: chown -R ' . (int)Settings::Get('system.vmail_uid') . ':' . (int)Settings::Get('system.vmail_gid') . ' ' . escapeshellarg($usermaildir));
+				FileDir::safe_exec('chown -R ' . (int)Settings::Get('system.vmail_uid') . ':' . (int)Settings::Get('system.vmail_gid') . ' ' . escapeshellarg($usermaildir));
+			}
 
 			// explicitly create files after user has been created to avoid unknown user issues for apache/php-fpm when task#1 runs after this
-			self::refreshUsers();
+			if ($refreshUsers) {
+				self::refreshUsers();
+			}
 		}
 	}
 
@@ -405,7 +412,7 @@ class TasksCron extends FroxlorCron
 		}
 	}
 
-	private static function setFilesystemQuota()
+	public static function setFilesystemQuota()
 	{
 		FroxlorLogger::getInstanceOf()->logAction(FroxlorLogger::CRON_ACTION, LOG_INFO, 'TasksCron: Task10 started - setting filesystem quota');
 
@@ -450,7 +457,7 @@ class TasksCron extends FroxlorCron
 		$antispam->writeConfigs();
 	}
 
-	private static function refreshUsers()
+	public static function refreshUsers()
 	{
 		if (Settings::Get('system.nssextrausers') == 1) {
 			$cronLog = FroxlorLogger::getInstanceOf();
