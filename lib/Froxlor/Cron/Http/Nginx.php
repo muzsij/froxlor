@@ -621,7 +621,16 @@ class Nginx extends HttpConfigBase
 
 		// create ssl settings first since they are required for normal and redirect vhosts
 		if ($ssl_vhost === true && $domain['ssl'] == '1' && Settings::Get('system.use_ssl') == '1') {
-			$vhost_content .= "\n" . $this->composeSslSettings($domain) . "\n";
+			$sslsettings = $this->composeSslSettings($domain);
+			// a server block with `listen ... ssl` but no ssl_certificate makes the
+			// whole nginx config invalid (reload fails for every domain on the node),
+			// e.g. while a Let's Encrypt certificate has not been issued yet and no
+			// fallback certificate exists on this node
+			if (strpos($sslsettings, 'ssl_certificate') === false) {
+				FroxlorLogger::getInstanceOf()->logAction(FroxlorLogger::CRON_ACTION, LOG_WARNING, $domain['domain'] . ' :: no usable ssl-certificate (yet), skipping ssl-vhost to keep nginx config valid');
+				return '# ssl-vhost for "' . $domain['domain'] . '" skipped: no usable ssl-certificate (yet)' . "\n";
+			}
+			$vhost_content .= "\n" . $sslsettings . "\n";
 		}
 
 		if (Settings::Get('system.use_ssl') == '1' && Settings::Get('system.leenabled') == '1') {
