@@ -185,6 +185,34 @@ refuses `froxlor:cron-slave`. A standard-installer-provisioned slave (whose
 `/etc/cron.d/froxlor` calls `froxlor:cron`) therefore fails loudly instead of
 silently consuming the master's queue.
 
+### Slave node provisioning requirements
+
+Things the slave cron does **not** create and the admin must provision on every
+node (the standard installer / distro-config step does this on the master):
+
+- **`system.logfiles_directory`** (default `/var/customers/logs/`) must exist —
+  it is only created by the distro configfiles step (`mkdir -p`), never by the
+  cron. If missing, every vhost's log-file `touch()` fails and nginx refuses to
+  reload (it opens the access/error logs at config load).
+- **The system fallback certificate** (`system.ssl_cert_file` /
+  `system.ssl_key_file`) is a shared DB setting but a per-node file. Beware:
+  if it points *into* `system.customer_ssl_path` (e.g.
+  `/etc/ssl/froxlor-custom/`), that directory is **wiped and regenerated from
+  the DB on every cron run** — and a slave only re-exports certs for its own
+  IP-scoped domains, so a foreign (e.g. the panel domain's) cert placed there
+  by hand disappears on the next run. Either point the fallback outside
+  `customer_ssl_path` and provision it on every node, or rely on the
+  skip-behaviour below.
+
+A domain whose certificate does not (yet) exist on the node — typically Let's
+Encrypt not issued yet and no usable fallback — gets **no ssl vhost at all**
+(`Nginx::getVhostContent()` skips the block) instead of an invalid
+`listen ... ssl` server block without `ssl_certificate`, which would make the
+whole nginx config unloadable and thereby also break the HTTP-01 challenge that
+the certificate issuance itself depends on. The flow self-heals across cron
+runs: run *n* renders the plain-http vhost (incl. the acme-challenge include)
+and reloads nginx, run *n+1* issues the certificate and renders the ssl vhost.
+
 ### Consequences to be aware of (not bugs, but by design)
 
 - **Deletion is master-only.** The slave cron only ever *creates* home
