@@ -418,6 +418,9 @@ class Nginx extends HttpConfigBase
 				if (!empty(Settings::Get('system.dhparams_file'))) {
 					$dhparams = FileDir::makeCorrectFile(Settings::Get('system.dhparams_file'));
 					if (!file_exists($dhparams)) {
+						if (!is_dir(dirname($dhparams))) {
+							FileDir::safe_exec('mkdir -p ' . escapeshellarg(dirname($dhparams)));
+						}
 						file_put_contents($dhparams, self::FFDHE4096);
 					}
 					$sslsettings .= "\t" . 'ssl_dhparam ' . $dhparams . ';' . "\n";
