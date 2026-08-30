@@ -35,6 +35,7 @@ use Froxlor\FroxlorLogger;
 use Froxlor\PhpHelper;
 use Froxlor\Settings;
 use Froxlor\System\Cronjob;
+use Froxlor\System\ServerInfo;
 use PDO;
 
 /**
@@ -87,6 +88,15 @@ EOC;
 			$restart_cmds = $startstop_sel->fetchAll(PDO::FETCH_ASSOC);
 			// restart all php-fpm instances
 			foreach ($restart_cmds as $restart_cmd) {
+				// multi-server: panel_fpmdaemons is shared across all nodes but not
+				// every php-fpm version is installed on every node; the config_dir
+				// (e.g. /etc/php/8.2/fpm/pool.d/) only exists where the version is
+				// installed, so skip daemons this node does not have instead of
+				// running a failing restart (and creating dummy pools out of thin air)
+				if (ServerInfo::isLocalIpScopeEnabled() && !is_dir(FileDir::makeCorrectDir($restart_cmd['config_dir']))) {
+					FroxlorLogger::getInstanceOf()->logAction(FroxlorLogger::CRON_ACTION, LOG_INFO, $called_class . '::reload: fpm config directory "' . $restart_cmd['config_dir'] . '" does not exist on this node. Skipping "' . $restart_cmd['reload_cmd'] . '".');
+					continue;
+				}
 				// check whether the config dir is empty (no domains uses this daemon)
 				// so we need to create a dummy
 				$_conffiles = glob(FileDir::makeCorrectFile($restart_cmd['config_dir'] . "/*.conf"));

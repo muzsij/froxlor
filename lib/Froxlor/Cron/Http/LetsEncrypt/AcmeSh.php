@@ -225,6 +225,10 @@ class AcmeSh extends FroxlorCron
 	 */
 	private static function issueFroxlorVhost()
 	{
+		// the froxlor panel certificate belongs to the master only
+		if (\Froxlor\System\ServerInfo::isSlaveNode()) {
+			return false;
+		}
 		if (Settings::Get('system.le_froxlor_enabled') == '1') {
 			// let's encrypt is enabled, now check whether we have a certificate
 			$froxlor_ssl_settings_stmt = Database::prepare("
@@ -331,6 +335,7 @@ EOC;
 				AND dom.`iswildcarddomain` = 0
 				AND dom.`email_only` = 0
 				AND domssl.`validtodate` IS NULL
+				" . \Froxlor\System\ServerInfo::ipFilterSql('dom') . "
 		");
 		$customer_ssl = $certificates_stmt->fetchAll(PDO::FETCH_ASSOC);
 		if ($customer_ssl) {
@@ -347,6 +352,10 @@ EOC;
 	 */
 	private static function renewFroxlorVhost()
 	{
+		// the froxlor panel certificate belongs to the master only
+		if (\Froxlor\System\ServerInfo::isSlaveNode()) {
+			return false;
+		}
 		if (Settings::Get('system.le_froxlor_enabled') == '1') {
 			// let's encrypt is enabled, now check whether we have a certificate
 			$froxlor_ssl_settings_stmt = Database::prepare("
@@ -396,6 +405,7 @@ EOC;
 				AND dom.`iswildcarddomain` = 0
 				AND dom.`email_only` = 0
 				AND dom.`ssl_redirect` != 2
+				" . \Froxlor\System\ServerInfo::ipFilterSql('dom') . "
 		");
 		$renew_certs = $certificates_stmt->fetchAll(PDO::FETCH_ASSOC);
 		if ($renew_certs) {
