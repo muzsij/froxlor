@@ -36,6 +36,10 @@ class NginxFcgi extends Nginx
 
 	public function createOwnVhostStarter()
 	{
+		// no panel vhost on slave nodes -> no php-config for it either
+		if (\Froxlor\System\ServerInfo::isSlaveNode()) {
+			return;
+		}
 		if (Settings::Get('phpfpm.enabled') == '1' && Settings::Get('phpfpm.enabled_ownvhost') == '1') {
 			$mypath = Froxlor::getInstallDir();
 

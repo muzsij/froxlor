@@ -93,6 +93,10 @@ class Nginx extends HttpConfigBase
 		");
 
 		while ($row_ipsandports = $result_ipsandports_stmt->fetch(PDO::FETCH_ASSOC)) {
+			// multi-server: never emit listen/vhost statements for another node's IPs
+			if (!\Froxlor\System\ServerInfo::servesIpAndPort((int)$row_ipsandports['id'])) {
+				continue;
+			}
 			if (filter_var($row_ipsandports['ip'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
 				$ip = '[' . $row_ipsandports['ip'] . ']';
 			} else {
@@ -107,7 +111,8 @@ class Nginx extends HttpConfigBase
 				$this->nginx_data[$vhost_filename] = '';
 			}
 
-			if ($row_ipsandports['vhostcontainer'] == '1') {
+			// the froxlor panel vhost is only served by the master node
+			if ($row_ipsandports['vhostcontainer'] == '1' && !\Froxlor\System\ServerInfo::isSlaveNode()) {
 				$this->nginx_data[$vhost_filename] .= 'server { ' . "\n";
 
 				$mypath = $this->getMyPath($row_ipsandports);
@@ -413,6 +418,9 @@ class Nginx extends HttpConfigBase
 				if (!empty(Settings::Get('system.dhparams_file'))) {
 					$dhparams = FileDir::makeCorrectFile(Settings::Get('system.dhparams_file'));
 					if (!file_exists($dhparams)) {
+						if (!is_dir(dirname($dhparams))) {
+							FileDir::safe_exec('mkdir -p ' . escapeshellarg(dirname($dhparams)));
+						}
 						file_put_contents($dhparams, self::FFDHE4096);
 					}
 					$sslsettings .= "\t" . 'ssl_dhparam ' . $dhparams . ';' . "\n";
@@ -511,7 +519,7 @@ class Nginx extends HttpConfigBase
 		$has_http2_on = false;
 
 		$query = "SELECT * FROM `" . TABLE_PANEL_IPSANDPORTS . "` `i`, `" . TABLE_DOMAINTOIP . "` `dip`
-			WHERE dip.id_domain = :domainid AND i.id = dip.id_ipandports ";
+			WHERE dip.id_domain = :domainid AND i.id = dip.id_ipandports " . \Froxlor\System\ServerInfo::ipPortFilterSql('i');
 
 		if ($ssl_vhost === true && ($domain['ssl'] == '1' || $domain['ssl_redirect'] == '1')) {
 			// by ordering by cert-file the row with filled out SSL-Fields will be shown last,
@@ -592,6 +600,7 @@ class Nginx extends HttpConfigBase
 				LEFT JOIN `" . TABLE_DOMAINTOIP . "` `dip` ON (`ip`.`id` = `dip`.`id_ipandports`)
 				WHERE `dip`.`id_domain` = :domainid
 				AND `ip`.`ssl` = '1'  AND `ip`.`port` != 443
+				" . \Froxlor\System\ServerInfo::ipPortFilterSql('ip') . "
 				ORDER BY `ip`.`ssl_cert_file` DESC, `ip`.`port` LIMIT 1;");
 			$ssldestport = Database::pexecute_first($ssldestport_stmt, [
 				'domainid' => $domain['id']
@@ -615,7 +624,16 @@ class Nginx extends HttpConfigBase
 
 		// create ssl settings first since they are required for normal and redirect vhosts
 		if ($ssl_vhost === true && $domain['ssl'] == '1' && Settings::Get('system.use_ssl') == '1') {
-			$vhost_content .= "\n" . $this->composeSslSettings($domain) . "\n";
+			$sslsettings = $this->composeSslSettings($domain);
+			// a server block with `listen ... ssl` but no ssl_certificate makes the
+			// whole nginx config invalid (reload fails for every domain on the node),
+			// e.g. while a Let's Encrypt certificate has not been issued yet and no
+			// fallback certificate exists on this node
+			if (strpos($sslsettings, 'ssl_certificate') === false) {
+				FroxlorLogger::getInstanceOf()->logAction(FroxlorLogger::CRON_ACTION, LOG_WARNING, $domain['domain'] . ' :: no usable ssl-certificate (yet), skipping ssl-vhost to keep nginx config valid');
+				return '# ssl-vhost for "' . $domain['domain'] . '" skipped: no usable ssl-certificate (yet)' . "\n";
+			}
+			$vhost_content .= "\n" . $sslsettings . "\n";
 		}
 
 		if (Settings::Get('system.use_ssl') == '1' && Settings::Get('system.leenabled') == '1') {
